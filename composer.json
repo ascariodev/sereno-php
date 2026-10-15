@@ -24,6 +24,7 @@
             "Sereno\\Tests\\": "tests/"
         }
     },
+    "bin": ["bin/sereno-test"],
     "scripts": {
         "test": "phpunit"
     },

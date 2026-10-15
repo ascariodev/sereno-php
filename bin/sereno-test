@@ -1,0 +1,65 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoloadCandidates = [
+    $GLOBALS['_composer_autoload_path'] ?? null,
+    __DIR__.'/../vendor/autoload.php',
+    __DIR__.'/../../../autoload.php',
+];
+
+foreach ($autoloadCandidates as $autoload) {
+    if (is_string($autoload) && is_file($autoload)) {
+        require $autoload;
+
+        break;
+    }
+}
+
+if (! class_exists(Sereno\ConnectionTester::class)) {
+    fwrite(STDERR, "Could not find the Composer autoloader. Run \"composer install\" first.\n");
+    exit(1);
+}
+
+$options = getopt('', ['key::', 'url::', 'help']);
+
+if (isset($options['help'])) {
+    echo "Usage: sereno-test [--key=<key>] [--url=<url>]\n";
+    echo "Sends a test event to Sereno. Falls back to SERENO_KEY and SERENO_URL.\n";
+    exit(0);
+}
+
+$pick = static function (string $option, string $env) use ($options): ?string {
+    $value = $options[$option] ?? null;
+
+    if (is_string($value) && $value !== '') {
+        return $value;
+    }
+
+    $value = getenv($env);
+
+    return is_string($value) ? $value : null;
+};
+
+$result = (new Sereno\ConnectionTester)->test($pick('url', 'SERENO_URL'), $pick('key', 'SERENO_KEY'));
+$detail = $result['detail'] !== null ? ' ('.$result['detail'].')' : '';
+
+switch ($result['status']) {
+    case Sereno\ConnectionTester::CONNECTED:
+        echo "Connected: Sereno accepted the test event.\n";
+        exit(0);
+    case Sereno\ConnectionTester::UNAUTHORIZED:
+        echo "Unauthorized: the key was rejected. Check that it is correct and has not been revoked.\n";
+        break;
+    case Sereno\ConnectionTester::NO_URL:
+        echo "Missing URL: pass --url=<url> or set SERENO_URL.\n";
+        break;
+    case Sereno\ConnectionTester::NO_KEY:
+        echo "Missing key: pass --key=<key> or set SERENO_KEY.\n";
+        break;
+    default:
+        echo 'Failed: could not deliver the test event'.$detail.".\n";
+}
+
+exit(1);
