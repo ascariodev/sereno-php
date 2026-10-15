@@ -43,7 +43,11 @@ final class Sereno
         $key = self::setting($key, 'SERENO_KEY');
         $url = self::setting($url, 'SERENO_URL');
 
-        $handler = new SerenoHandler($url, $key, $options['level'] ?? Level::Debug, true, $options['timeout'] ?? null);
+        $level = self::level($options['level'] ?? self::setting(null, 'SERENO_LEVEL'));
+        $timeoutSetting = self::setting(null, 'SERENO_TIMEOUT');
+        $timeout = $options['timeout'] ?? ($timeoutSetting !== '' ? $timeoutSetting : null);
+
+        $handler = new SerenoHandler($url, $key, $level, true, $timeout);
         $logger = new Logger('sereno', [$handler]);
         self::$logger = $logger;
         self::$handler = $handler;
@@ -132,6 +136,19 @@ final class Sereno
             ($errno & (E_NOTICE | E_USER_NOTICE)) !== 0 => Level::Notice,
             default => Level::Info,
         };
+    }
+
+    private static function level(int|string|Level $value): Level
+    {
+        if ($value === '') {
+            return Level::Debug;
+        }
+
+        try {
+            return Logger::toMonologLevel($value);
+        } catch (Throwable) {
+            return Level::Debug;
+        }
     }
 
     private static function setting(?string $value, string $name): string

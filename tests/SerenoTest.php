@@ -189,6 +189,39 @@ final class SerenoTest extends TestCase
         $this->assertSame(['once', 'chained once'], array_column($this->events(), 'message'));
     }
 
+    public function test_level_and_timeout_fall_back_to_the_environment_and_options_win(): void
+    {
+        $script = $this->script(<<<'PHP'
+            $logger = \Sereno\Sereno::init(%KEY%, %URL%, ['handlers' => false]);
+            $logger->info('dropped');
+            $logger->warning('kept');
+            PHP);
+
+        $this->runScript($script, ['SERENO_LEVEL' => 'warning', 'SERENO_TIMEOUT' => '3']);
+        $this->assertSame(['kept'], array_column($this->events(), 'message'));
+
+        $script = $this->script(<<<'PHP'
+            $logger = \Sereno\Sereno::init(%KEY%, %URL%, ['handlers' => false, 'level' => 'debug']);
+            $logger->info('option wins');
+            PHP);
+
+        $this->runScript($script, ['SERENO_LEVEL' => 'error']);
+        $this->assertSame(['kept', 'option wins'], array_column($this->events(), 'message'));
+    }
+
+    public function test_invalid_level_in_the_environment_falls_back_to_debug(): void
+    {
+        $script = $this->script(<<<'PHP'
+            $logger = \Sereno\Sereno::init(%KEY%, %URL%, ['handlers' => false]);
+            $logger->debug('still sent');
+            PHP);
+
+        [, , $code] = $this->runScript($script, ['SERENO_LEVEL' => 'nonsense']);
+
+        $this->assertSame(0, $code);
+        $this->assertSame(['still sent'], array_column($this->events(), 'message'));
+    }
+
     /**
      * @return list<array<string, mixed>>
      */
