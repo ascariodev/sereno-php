@@ -3,6 +3,11 @@
     "description": "Sereno SDK for PHP: sends logs and errors to Sereno from plain PHP, Symfony and any Monolog setup.",
     "type": "library",
     "license": "MIT",
+    "homepage": "https://github.com/ascariodev/sereno-php",
+    "support": {
+        "issues": "https://github.com/ascariodev/sereno-php/issues",
+        "source": "https://github.com/ascariodev/sereno-php"
+    },
     "keywords": ["sereno", "logging", "monolog", "errors"],
     "require": {
         "php": "^8.1",
