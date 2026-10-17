@@ -143,6 +143,58 @@ final class SerenoTest extends TestCase
         $this->assertStringContainsString('Allowed memory size', $events[0]['message']);
     }
 
+    public function test_user_error_handled_by_the_sdk_is_not_reported_again_on_shutdown(): void
+    {
+        $script = $this->script(<<<'PHP'
+            \Sereno\Sereno::init(%KEY%, %URL%);
+            trigger_error('fatal user', E_USER_ERROR);
+            PHP);
+
+        [, , $code] = $this->runScript($script);
+
+        $this->assertSame(255, $code);
+        $this->assertSame(['fatal user'], array_column($this->events(), 'message'));
+    }
+
+    public function test_previous_error_handler_that_throws_is_reported_once_and_the_exception_propagates(): void
+    {
+        $script = $this->script(<<<'PHP'
+            set_error_handler(function (int $no, string $str): bool {
+                throw new ErrorException($str, 0, $no);
+            });
+            \Sereno\Sereno::init(%KEY%, %URL%);
+            try {
+                trigger_error('caught one', E_USER_WARNING);
+            } catch (ErrorException $e) {
+                echo 'CAUGHT:'.$e->getMessage().';';
+            }
+            trigger_error('uncaught one', E_USER_WARNING);
+            PHP);
+
+        [$out, $err, $code] = $this->runScript($script);
+
+        $this->assertSame('CAUGHT:caught one;', $out);
+        $this->assertSame(255, $code);
+        $this->assertStringContainsString('Uncaught ErrorException: uncaught one', $err);
+        $this->assertSame(['caught one', 'uncaught one'], array_column($this->events(), 'message'));
+    }
+
+    public function test_previous_exception_handler_that_throws_reports_the_original_once_and_propagates(): void
+    {
+        $script = $this->script(<<<'PHP'
+            set_exception_handler(function (Throwable $e): void {
+                throw new DomainException('from previous');
+            });
+            \Sereno\Sereno::init(%KEY%, %URL%);
+            throw new RuntimeException('original');
+            PHP);
+
+        [, , $code] = $this->runScript($script);
+
+        $this->assertSame(255, $code);
+        $this->assertSame(['original'], array_column($this->events(), 'message'));
+    }
+
     public function test_without_key_or_url_nothing_is_registered(): void
     {
         $script = $this->script(<<<'PHP'
