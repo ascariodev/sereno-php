@@ -160,7 +160,7 @@ class SerenoHandler extends AbstractHandler
             $this->transport ??= new Transport($this->url, $this->key, $this->timeout);
             $result = $this->transport->send($batch);
         } catch (Throwable $e) {
-            $this->report(sprintf('Sereno log delivery failed: error=%s events=%d', $e->getMessage(), count($batch)));
+            $this->report(sprintf('Sereno log delivery failed: error=%s events=%d', Redactor::redact($e->getMessage(), $this->key), count($batch)));
 
             return;
         }

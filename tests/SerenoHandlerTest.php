@@ -209,6 +209,17 @@ final class SerenoHandlerTest extends TestCase
         $this->assertStringContainsString('events=1', $this->notices[0]);
     }
 
+    public function testThrownTransportMessageIsRedactedBeforeNotifying(): void
+    {
+        $this->transport->throw = new \RuntimeException('bad http://user:secret@sereno.test wsk_x');
+        $handler = $this->handler();
+        $handler->handle($this->record());
+        $handler->close();
+
+        $this->assertCount(1, $this->notices);
+        $this->assertStringContainsString('error=bad http://sereno.test *** events=1', $this->notices[0]);
+    }
+
     public function testTransportThatThrowsNeverThrows(): void
     {
         $this->transport->throw = new \RuntimeException('boom');
