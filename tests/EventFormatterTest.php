@@ -6,6 +6,7 @@ namespace Sereno\Tests;
 
 use DateTimeImmutable;
 use Exception;
+use JsonSerializable;
 use Monolog\Level;
 use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -13,6 +14,7 @@ use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 use RuntimeException;
 use Sereno\EventFormatter;
+use Stringable;
 use Throwable;
 
 final class FixtureObject {}
@@ -71,6 +73,60 @@ final class EventFormatterTest extends TestCase
         $formatter = new EventFormatter;
 
         $this->assertNotSame($formatter->format($record)['id'], $formatter->format($record)['id']);
+    }
+
+    public function test_invalid_utf8_in_message_becomes_question_mark(): void
+    {
+        $this->assertSame('a?b', $this->formatRecord("a\xFFb")['message']);
+    }
+
+    public function test_invalid_utf8_in_context_key_becomes_question_mark(): void
+    {
+        $this->assertSame(['k?' => 'v'], $this->formatRecord('m', ["k\xFF" => 'v'])['context']);
+    }
+
+    public function test_json_serializable_is_expanded(): void
+    {
+        $value = new class implements JsonSerializable
+        {
+            public function jsonSerialize(): array
+            {
+                return ['a' => 1, 'b' => ['c' => "x\xFF"]];
+            }
+        };
+
+        $this->assertSame(['v' => ['a' => 1, 'b' => ['c' => 'x?']]], $this->formatRecord('m', ['v' => $value])['context']);
+    }
+
+    public function test_stringable_is_cast_to_string(): void
+    {
+        $value = new class implements Stringable
+        {
+            public function __toString(): string
+            {
+                return 'text';
+            }
+        };
+
+        $this->assertSame(['v' => 'text'], $this->formatRecord('m', ['v' => $value])['context']);
+    }
+
+    public function test_nested_exception_is_serialized(): void
+    {
+        $context = $this->formatRecord('m', ['wrapper' => ['error' => new RuntimeException('boom')]])['context'];
+
+        $this->assertSame(RuntimeException::class, $context['wrapper']['error']['class']);
+        $this->assertSame('boom', $context['wrapper']['error']['message']);
+        $this->assertArrayHasKey('trace', $context['wrapper']['error']);
+    }
+
+    /**
+     * @param  array<mixed>  $context
+     * @return array<string, mixed>
+     */
+    private function formatRecord(string $message, array $context = []): array
+    {
+        return (new EventFormatter)->format(new LogRecord(new DateTimeImmutable, 'test', Level::Info, $message, $context));
     }
 
     private function resolve(mixed $value): mixed

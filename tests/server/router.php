@@ -1,5 +1,10 @@
 <?php
 
+if (parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) === '/__ready') {
+    echo 'sereno-test-server';
+    return;
+}
+
 $dir = getenv('SERENO_TEST_DIR');
 $logFile = $dir.'/requests.log';
 $controlFile = $dir.'/control.json';

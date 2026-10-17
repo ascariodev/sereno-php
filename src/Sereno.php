@@ -29,9 +29,21 @@ final class Sereno
     /** @var callable|null */
     private static $previousErrorHandler = null;
 
+    /** @var array{int, string, string, int}|null */
+    private static ?array $lastReportedError = null;
+
+    private static ?Throwable $thrownByPreviousErrorHandler = null;
+
+    private static bool $suppressShutdownReport = false;
+
     private function __construct() {}
 
     /**
+     * Duplicates: a fatal already reported by handleError (E_USER_ERROR) is not reported again on shutdown.
+     * If the previous error handler throws, the error is reported once, the exception is not reported again by
+     * handleException, and it propagates as it would without the SDK. If the previous exception handler throws,
+     * the original exception stays reported once, the new one propagates and its fatal is not reported on shutdown.
+     *
      * @param  array{level?: int|string|Level, timeout?: int|float|string|null, errorLevel?: int, handlers?: bool}  $options
      */
     public static function init(?string $key = null, ?string $url = null, array $options = []): Logger
@@ -78,13 +90,21 @@ final class Sereno
     public static function handleException(Throwable $exception): void
     {
         try {
-            self::$logger?->error($exception->getMessage(), ['exception' => $exception]);
+            if ($exception !== self::$thrownByPreviousErrorHandler) {
+                self::$logger?->error($exception->getMessage(), ['exception' => $exception]);
+            }
             self::$handler?->flush();
         } catch (Throwable) {
         }
 
         if (self::$previousExceptionHandler !== null) {
-            (self::$previousExceptionHandler)($exception);
+            try {
+                (self::$previousExceptionHandler)($exception);
+            } catch (Throwable $thrown) {
+                self::$suppressShutdownReport = true;
+
+                throw $thrown;
+            }
 
             return;
         }
@@ -103,6 +123,7 @@ final class Sereno
         try {
             if ((error_reporting() & $errno) !== 0 && (self::$errorLevel & $errno) !== 0) {
                 self::$logger?->log(self::levelFor($errno), $errstr, ['file' => $errfile, 'line' => $errline, 'errno' => $errno]);
+                self::$lastReportedError = [$errno, $errstr, $errfile, $errline];
             }
         } catch (Throwable) {
         }
@@ -111,7 +132,13 @@ final class Sereno
             return false;
         }
 
-        return (self::$previousErrorHandler)($errno, $errstr, $errfile, $errline);
+        try {
+            return (self::$previousErrorHandler)($errno, $errstr, $errfile, $errline);
+        } catch (Throwable $thrown) {
+            self::$thrownByPreviousErrorHandler = $thrown;
+
+            throw $thrown;
+        }
     }
 
     public static function handleShutdown(): void
@@ -119,7 +146,9 @@ final class Sereno
         try {
             $error = error_get_last();
 
-            if ($error !== null && ($error['type'] & self::FATAL_TYPES) !== 0) {
+            $alreadyReported = self::$lastReportedError === [$error['type'] ?? null, $error['message'] ?? null, $error['file'] ?? null, $error['line'] ?? null];
+
+            if ($error !== null && ! $alreadyReported && ! self::$suppressShutdownReport && ($error['type'] & self::FATAL_TYPES) !== 0) {
                 self::$logger?->critical($error['message'], ['file' => $error['file'], 'line' => $error['line'], 'errno' => $error['type']]);
             }
 

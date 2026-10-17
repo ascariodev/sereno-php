@@ -51,7 +51,7 @@ final class ConnectionTester
             $payload = json_encode(['events' => [$this->formatter->format($record)]]);
 
             if ($payload === false) {
-                return ['status' => self::FAILED, 'detail' => json_last_error_msg()];
+                return ['status' => self::FAILED, 'detail' => Redactor::redact(json_last_error_msg(), $key)];
             }
 
             $handle = curl_init(rtrim($url, '/').Transport::INGEST_PATH);
@@ -76,12 +76,12 @@ final class ConnectionTester
             ]);
 
             if (curl_exec($handle) === false) {
-                return ['status' => self::FAILED, 'detail' => curl_error($handle) ?: 'curl request failed'];
+                return ['status' => self::FAILED, 'detail' => Redactor::redact(curl_error($handle) ?: 'curl request failed', $key)];
             }
 
             $code = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
         } catch (Throwable $e) {
-            return ['status' => self::FAILED, 'detail' => $e->getMessage()];
+            return ['status' => self::FAILED, 'detail' => Redactor::redact($e->getMessage(), $key)];
         }
 
         if ($code === 202) {

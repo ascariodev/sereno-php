@@ -62,7 +62,7 @@ final class Transport
             $payload = json_encode(['events' => $batch]);
 
             if ($payload === false) {
-                return DeliveryResult::error(json_last_error_msg(), false, 0);
+                return DeliveryResult::error($this->redact(json_last_error_msg()), false, 0);
             }
 
             $startedAt = ($this->clock)();
@@ -78,8 +78,13 @@ final class Transport
 
             return $result;
         } catch (Throwable $e) {
-            return DeliveryResult::error($e->getMessage(), false, 0);
+            return DeliveryResult::error($this->redact($e->getMessage()), false, 0);
         }
+    }
+
+    private function redact(string $text): string
+    {
+        return Redactor::redact($text, $this->key);
     }
 
     private function attempt(string $payload, int|float $timeout, int $attempts): DeliveryResult
@@ -111,7 +116,7 @@ final class Transport
             $body = curl_exec($handle);
 
             if ($body === false) {
-                return DeliveryResult::error(curl_error($handle) ?: 'curl request failed', true, $attempts);
+                return DeliveryResult::error($this->redact(curl_error($handle) ?: 'curl request failed'), true, $attempts);
             }
 
             $code = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
@@ -122,7 +127,7 @@ final class Transport
 
             return DeliveryResult::rejected($code, (string) $body, $attempts);
         } catch (Throwable $e) {
-            return DeliveryResult::error($e->getMessage(), false, $attempts);
+            return DeliveryResult::error($this->redact($e->getMessage()), false, $attempts);
         }
     }
 }

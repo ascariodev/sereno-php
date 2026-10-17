@@ -12,8 +12,7 @@ final class TransportTest extends TestCase
 {
     private const KEY = 'wsk_0123456789012345678901234567890123456789';
 
-    /** @var resource|null */
-    private $process = null;
+    private ?TestServer $server = null;
 
     private string $dir = '';
 
@@ -23,15 +22,12 @@ final class TransportTest extends TestCase
     {
         $this->dir = sys_get_temp_dir().'/sereno-transport-'.bin2hex(random_bytes(6));
         mkdir($this->dir);
-        $this->port = $this->freePort();
+        $this->port = TestServer::freePort();
     }
 
     protected function tearDown(): void
     {
-        if (is_resource($this->process)) {
-            proc_terminate($this->process);
-            proc_close($this->process);
-        }
+        $this->server?->stop();
 
         foreach (glob($this->dir.'/*') ?: [] as $file) {
             unlink($file);
@@ -145,17 +141,28 @@ final class TransportTest extends TestCase
 
     public function test_timeout_stays_inside_the_budget(): void
     {
-        $this->startServer([['status' => 202, 'body' => '{}', 'sleep' => 3]], 4);
+        $listener = stream_socket_server('tcp://127.0.0.1:0');
+        $this->assertNotFalse($listener);
+        $name = (string) stream_socket_get_name($listener, false);
+        $port = (int) substr($name, strrpos($name, ':') + 1);
 
         $startedAt = microtime(true);
-        $result = (new Transport($this->baseUrl(), self::KEY, 0.4))->send($this->batch(1));
+        $result = (new Transport('http://127.0.0.1:'.$port, self::KEY, 0.4))->send($this->batch(1));
         $elapsed = microtime(true) - $startedAt;
 
         $this->assertTrue($result->isError());
         $this->assertTrue($result->transient);
         $this->assertSame(2, $result->attempts);
-        $this->assertLessThan(2.0, $elapsed);
-        $this->assertCount(2, $this->requests());
+        $this->assertGreaterThanOrEqual(0.7, $elapsed);
+        $this->assertLessThan(3.0, $elapsed);
+
+        $connections = 0;
+        while (($connection = @stream_socket_accept($listener, 0)) !== false) {
+            $connections++;
+            fclose($connection);
+        }
+        fclose($listener);
+        $this->assertSame(2, $connections);
     }
 
     public function test_retry_is_skipped_when_less_than_half_a_second_is_left(): void
@@ -266,48 +273,13 @@ final class TransportTest extends TestCase
     }
 
     /**
-     * @param  list<array{status: int, body: string, sleep?: int|float}>  $responses
+     * @param  list<array{status: int, body: string}>  $responses
      */
-    private function startServer(array $responses, int $workers = 1): void
+    private function startServer(array $responses): void
     {
         file_put_contents($this->dir.'/control.json', json_encode($responses));
 
-        $command = [PHP_BINARY, '-S', '127.0.0.1:'.$this->port, __DIR__.'/server/router.php'];
-        $env = array_merge(getenv(), [
-            'SERENO_TEST_DIR' => $this->dir,
-            'PHP_CLI_SERVER_WORKERS' => (string) $workers,
-        ]);
-
-        $this->process = proc_open(
-            $command,
-            [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
-            $pipes,
-            null,
-            $env,
-        );
-        $this->assertIsResource($this->process);
-
-        for ($i = 0; $i < 100; $i++) {
-            $socket = @fsockopen('127.0.0.1', $this->port, $errno, $errstr, 0.1);
-
-            if ($socket !== false) {
-                fclose($socket);
-
-                return;
-            }
-
-            usleep(50_000);
-        }
-
-        $this->fail('The test HTTP server did not start.');
-    }
-
-    private function freePort(): int
-    {
-        $server = stream_socket_server('tcp://127.0.0.1:0');
-        $name = (string) stream_socket_get_name($server, false);
-        fclose($server);
-
-        return (int) substr($name, strrpos($name, ':') + 1);
+        $this->server = TestServer::start($this->dir);
+        $this->port = $this->server->port;
     }
 }

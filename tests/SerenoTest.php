@@ -10,8 +10,7 @@ final class SerenoTest extends TestCase
 {
     private const KEY = 'wsk_0123456789012345678901234567890123456789';
 
-    /** @var resource|null */
-    private $process = null;
+    private ?TestServer $server = null;
 
     private string $dir = '';
 
@@ -21,16 +20,14 @@ final class SerenoTest extends TestCase
     {
         $this->dir = sys_get_temp_dir().'/sereno-global-'.bin2hex(random_bytes(6));
         mkdir($this->dir);
-        $this->port = $this->freePort();
-        $this->startServer();
+        file_put_contents($this->dir.'/control.json', '[]');
+        $this->server = TestServer::start($this->dir);
+        $this->port = $this->server->port;
     }
 
     protected function tearDown(): void
     {
-        if (is_resource($this->process)) {
-            proc_terminate($this->process);
-            proc_close($this->process);
-        }
+        $this->server?->stop();
 
         foreach (glob($this->dir.'/*') ?: [] as $file) {
             unlink($file);
@@ -141,6 +138,58 @@ final class SerenoTest extends TestCase
         $this->assertCount(1, $events);
         $this->assertSame('critical', $events[0]['level']);
         $this->assertStringContainsString('Allowed memory size', $events[0]['message']);
+    }
+
+    public function test_user_error_handled_by_the_sdk_is_not_reported_again_on_shutdown(): void
+    {
+        $script = $this->script(<<<'PHP'
+            \Sereno\Sereno::init(%KEY%, %URL%);
+            trigger_error('fatal user', E_USER_ERROR);
+            PHP);
+
+        [, , $code] = $this->runScript($script);
+
+        $this->assertSame(255, $code);
+        $this->assertSame(['fatal user'], array_column($this->events(), 'message'));
+    }
+
+    public function test_previous_error_handler_that_throws_is_reported_once_and_the_exception_propagates(): void
+    {
+        $script = $this->script(<<<'PHP'
+            set_error_handler(function (int $no, string $str): bool {
+                throw new ErrorException($str, 0, $no);
+            });
+            \Sereno\Sereno::init(%KEY%, %URL%);
+            try {
+                trigger_error('caught one', E_USER_WARNING);
+            } catch (ErrorException $e) {
+                echo 'CAUGHT:'.$e->getMessage().';';
+            }
+            trigger_error('uncaught one', E_USER_WARNING);
+            PHP);
+
+        [$out, $err, $code] = $this->runScript($script);
+
+        $this->assertSame('CAUGHT:caught one;', $out);
+        $this->assertSame(255, $code);
+        $this->assertStringContainsString('Uncaught ErrorException: uncaught one', $err);
+        $this->assertSame(['caught one', 'uncaught one'], array_column($this->events(), 'message'));
+    }
+
+    public function test_previous_exception_handler_that_throws_reports_the_original_once_and_propagates(): void
+    {
+        $script = $this->script(<<<'PHP'
+            set_exception_handler(function (Throwable $e): void {
+                throw new DomainException('from previous');
+            });
+            \Sereno\Sereno::init(%KEY%, %URL%);
+            throw new RuntimeException('original');
+            PHP);
+
+        [, , $code] = $this->runScript($script);
+
+        $this->assertSame(255, $code);
+        $this->assertSame(['original'], array_column($this->events(), 'message'));
     }
 
     public function test_without_key_or_url_nothing_is_registered(): void
@@ -271,40 +320,5 @@ final class SerenoTest extends TestCase
         fclose($pipes[2]);
 
         return [$out, $err, proc_close($process)];
-    }
-
-    private function startServer(): void
-    {
-        $this->process = proc_open(
-            [PHP_BINARY, '-S', '127.0.0.1:'.$this->port, __DIR__.'/server/router.php'],
-            [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
-            $pipes,
-            null,
-            array_merge(getenv(), ['SERENO_TEST_DIR' => $this->dir, 'PHP_CLI_SERVER_WORKERS' => '1']),
-        );
-        $this->assertIsResource($this->process);
-
-        for ($i = 0; $i < 100; $i++) {
-            $socket = @fsockopen('127.0.0.1', $this->port, $errno, $errstr, 0.1);
-
-            if ($socket !== false) {
-                fclose($socket);
-
-                return;
-            }
-
-            usleep(50_000);
-        }
-
-        $this->fail('Test server did not start');
-    }
-
-    private function freePort(): int
-    {
-        $server = stream_socket_server('tcp://127.0.0.1:0');
-        $name = (string) stream_socket_get_name($server, false);
-        fclose($server);
-
-        return (int) substr($name, strrpos($name, ':') + 1);
     }
 }
