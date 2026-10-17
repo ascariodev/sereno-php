@@ -25,7 +25,7 @@ class SerenoHandler extends AbstractHandler
 
     private int $dropped = 0;
 
-    private readonly bool $configured;
+    private bool $configured;
 
     private readonly string $url;
 
@@ -69,7 +69,12 @@ class SerenoHandler extends AbstractHandler
         if ($transport instanceof Transport) {
             $this->transport = $transport;
         } elseif ($transport instanceof Closure) {
-            $this->transport = $transport($this->url, $this->key, $this->timeout);
+            try {
+                $this->transport = $transport($this->url, $this->key, $this->timeout);
+            } catch (Throwable $e) {
+                $this->configured = false;
+                $this->report(sprintf('Sereno handler disabled: transport could not be created: %s', Redactor::redact($e->getMessage(), $this->key)));
+            }
         }
 
         if ($this->configured) {

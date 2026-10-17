@@ -134,6 +134,38 @@ final class SerenoHandlerTest extends TestCase
         $this->assertSame(2, $this->transport->events());
     }
 
+    public function testFailingTransportFactoryLeavesHandlerInertAndReportsOnce(): void
+    {
+        $handler = new SerenoHandler(
+            'http://sereno.test',
+            'wsk_secret',
+            Level::Debug,
+            true,
+            null,
+            function (): never {
+                throw new \RuntimeException('boom wsk_secret');
+            },
+            null,
+            function (Closure $flush): void {
+                $this->shutdowns[] = $flush;
+            },
+            function (string $message): void {
+                $this->notices[] = $message;
+            },
+        );
+
+        $this->assertFalse($handler->isHandling($this->record()));
+        $this->assertFalse($handler->handle($this->record()));
+        $handler->handle($this->record());
+        $handler->close();
+
+        $this->assertSame([], $this->shutdowns);
+        $this->assertSame([], $this->transport->batches);
+        $this->assertCount(1, $this->notices);
+        $this->assertStringContainsString('boom', $this->notices[0]);
+        $this->assertStringNotContainsString('wsk_secret', $this->notices[0]);
+    }
+
     public function testInertWithoutUrlOrKey(): void
     {
         foreach ([[null, 'k'], ['http://x', null], ['', ''], ['  ', 'k']] as [$url, $key]) {
