@@ -80,6 +80,33 @@ final class EventFormatterTest extends TestCase
         $this->assertSame('a?b', $this->formatRecord("a\xFFb")['message']);
     }
 
+    public function test_trim_handles_long_whitespace_runs(): void
+    {
+        $inner = 'a'.str_repeat(' ', 8000).'a';
+        $leading = str_repeat(' ', 8000).'a';
+
+        $this->assertSame($inner, $this->formatRecord($inner)['message']);
+        $this->assertSame($leading, $this->formatRecord($leading)['message']);
+        $this->assertSame('-', $this->formatRecord(str_repeat(' ', 8192))['message']);
+    }
+
+    public function test_trim_falls_back_when_pcre_fails(): void
+    {
+        $jit = ini_get('pcre.jit');
+        $limit = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+
+        try {
+            $message = $this->formatRecord("  hola  mundo  \n")['message'];
+        } finally {
+            ini_set('pcre.jit', (string) $jit);
+            ini_set('pcre.backtrack_limit', (string) $limit);
+        }
+
+        $this->assertSame("  hola  mundo  \n", $message);
+    }
+
     public function test_invalid_utf8_in_context_key_becomes_question_mark(): void
     {
         $this->assertSame(['k?' => 'v'], $this->formatRecord('m', ["k\xFF" => 'v'])['context']);
@@ -96,6 +123,34 @@ final class EventFormatterTest extends TestCase
         };
 
         $this->assertSame(['v' => ['a' => 1, 'b' => ['c' => 'x?']]], $this->formatRecord('m', ['v' => $value])['context']);
+    }
+
+    /**
+     * @return array<string, array{mixed, mixed}>
+     */
+    public static function scalarJsonSerializables(): array
+    {
+        return [
+            'string with invalid utf-8' => ["x\xFF", 'x?'],
+            'int' => [42, 42],
+            'bool' => [true, true],
+        ];
+    }
+
+    #[DataProvider('scalarJsonSerializables')]
+    public function test_json_serializable_returning_scalar_is_kept(mixed $returned, mixed $expected): void
+    {
+        $value = new class($returned) implements JsonSerializable
+        {
+            public function __construct(private mixed $returned) {}
+
+            public function jsonSerialize(): mixed
+            {
+                return $this->returned;
+            }
+        };
+
+        $this->assertSame(['v' => $expected], $this->formatRecord('m', ['v' => $value])['context']);
     }
 
     public function test_stringable_is_cast_to_string(): void
@@ -118,6 +173,29 @@ final class EventFormatterTest extends TestCase
         $this->assertSame(RuntimeException::class, $context['wrapper']['error']['class']);
         $this->assertSame('boom', $context['wrapper']['error']['message']);
         $this->assertArrayHasKey('trace', $context['wrapper']['error']);
+    }
+
+    public function test_nested_exception_has_location(): void
+    {
+        $exception = $this->makeException(['class' => RuntimeException::class, 'message' => 'boom', 'file' => '/app/Service.php', 'line' => 42]);
+
+        $context = $this->formatRecord('m', ['wrapper' => ['error' => $exception]])['context'];
+
+        $this->assertSame('/app/Service.php:42', $context['wrapper']['error']['location']);
+    }
+
+    public function test_invalid_utf8_in_nested_exception_message_becomes_question_mark(): void
+    {
+        $context = $this->formatRecord('m', ['wrapper' => ['error' => new RuntimeException("boom\xFF")]])['context'];
+
+        $this->assertSame('boom?', $context['wrapper']['error']['message']);
+    }
+
+    public function test_long_locationless_fingerprint_hashes_the_cleaned_text(): void
+    {
+        $exception = $this->makeException(['class' => RuntimeException::class, 'message' => str_repeat('😀', 255)."\0".'😀']);
+
+        $this->assertSame('efacf7a7621138b986fd1717ccb917e922dd1b73', $this->formatRecord('m', ['exception' => $exception])['fingerprint']);
     }
 
     /**
@@ -158,14 +236,20 @@ final class EventFormatterTest extends TestCase
     }
 
     /**
-     * @param  array{class: string, message: string, file: string, line: int}  $spec
+     * @param  array{class: string, message: string, file?: string, line?: int, trace?: string}  $spec
      */
     private function makeException(array $spec): Throwable
     {
         $exception = new RuntimeException($spec['message']);
 
-        foreach (['file' => $spec['file'], 'line' => $spec['line']] as $property => $value) {
+        foreach (['file' => $spec['file'] ?? '', 'line' => $spec['line'] ?? 0] as $property => $value) {
             (new ReflectionProperty(Exception::class, $property))->setValue($exception, $value);
+        }
+
+        if (isset($spec['trace'])) {
+            $pattern = '/\A#0 \[internal function\]: (.*)\(\)\n#1 \{main\}\z/su';
+            $this->assertSame(1, preg_match($pattern, $spec['trace'], $parts));
+            (new ReflectionProperty(Exception::class, 'trace'))->setValue($exception, [['function' => $parts[1]]]);
         }
 
         return $exception;

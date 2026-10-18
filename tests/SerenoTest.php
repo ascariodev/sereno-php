@@ -176,6 +176,28 @@ final class SerenoTest extends TestCase
         $this->assertSame(['caught one', 'uncaught one'], array_column($this->events(), 'message'));
     }
 
+    public function test_the_exception_thrown_by_the_previous_error_handler_is_only_skipped_once(): void
+    {
+        $script = $this->script(<<<'PHP'
+            set_error_handler(function (int $no, string $str): bool {
+                throw new ErrorException($str, 0, $no);
+            });
+            set_exception_handler(function (Throwable $e): void {});
+            \Sereno\Sereno::init(%KEY%, %URL%);
+            try {
+                trigger_error('once', E_USER_WARNING);
+            } catch (ErrorException $e) {
+                \Sereno\Sereno::handleException($e);
+                \Sereno\Sereno::handleException($e);
+            }
+            PHP);
+
+        [, , $code] = $this->runScript($script);
+
+        $this->assertSame(0, $code);
+        $this->assertSame(['once', 'once'], array_column($this->events(), 'message'));
+    }
+
     public function test_previous_exception_handler_that_throws_reports_the_original_once_and_propagates(): void
     {
         $script = $this->script(<<<'PHP'

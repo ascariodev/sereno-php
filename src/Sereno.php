@@ -42,7 +42,8 @@ final class Sereno
      * Duplicates: a fatal already reported by handleError (E_USER_ERROR) is not reported again on shutdown.
      * If the previous error handler throws, the error is reported once, the exception is not reported again by
      * handleException, and it propagates as it would without the SDK. If the previous exception handler throws,
-     * the original exception stays reported once, the new one propagates and its fatal is not reported on shutdown.
+     * only the original exception is reported, not the one it throws; that one propagates and its fatal is not
+     * reported on shutdown.
      *
      * @param  array{level?: int|string|Level, timeout?: int|float|string|null, errorLevel?: int, handlers?: bool}  $options
      */
@@ -89,8 +90,11 @@ final class Sereno
 
     public static function handleException(Throwable $exception): void
     {
+        $thrownByErrorHandler = self::$thrownByPreviousErrorHandler;
+        self::$thrownByPreviousErrorHandler = null;
+
         try {
-            if ($exception !== self::$thrownByPreviousErrorHandler) {
+            if ($exception !== $thrownByErrorHandler) {
                 self::$logger?->error($exception->getMessage(), ['exception' => $exception]);
             }
             self::$handler?->flush();
