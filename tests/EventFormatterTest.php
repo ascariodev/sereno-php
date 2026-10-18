@@ -191,6 +191,13 @@ final class EventFormatterTest extends TestCase
         $this->assertSame('boom?', $context['wrapper']['error']['message']);
     }
 
+    public function test_long_locationless_fingerprint_hashes_the_cleaned_text(): void
+    {
+        $exception = $this->makeException(['class' => RuntimeException::class, 'message' => str_repeat('😀', 255)."\0".'😀']);
+
+        $this->assertSame('efacf7a7621138b986fd1717ccb917e922dd1b73', $this->formatRecord('m', ['exception' => $exception])['fingerprint']);
+    }
+
     /**
      * @param  array<mixed>  $context
      * @return array<string, mixed>
