@@ -11,8 +11,7 @@ final class ConnectionTesterTest extends TestCase
 {
     private const KEY = 'wsk_0123456789012345678901234567890123456789';
 
-    /** @var resource|null */
-    private $process = null;
+    private ?TestServer $server = null;
 
     private string $dir = '';
 
@@ -22,15 +21,12 @@ final class ConnectionTesterTest extends TestCase
     {
         $this->dir = sys_get_temp_dir().'/sereno-tester-'.bin2hex(random_bytes(6));
         mkdir($this->dir);
-        $this->port = $this->freePort();
+        $this->port = TestServer::freePort();
     }
 
     protected function tearDown(): void
     {
-        if (is_resource($this->process)) {
-            proc_terminate($this->process);
-            proc_close($this->process);
-        }
+        $this->server?->stop();
 
         foreach (glob($this->dir.'/*') ?: [] as $file) {
             unlink($file);
@@ -178,36 +174,7 @@ final class ConnectionTesterTest extends TestCase
     {
         file_put_contents($this->dir.'/control.json', json_encode([['status' => $status, 'body' => '{}']]));
 
-        $this->process = proc_open(
-            [PHP_BINARY, '-S', '127.0.0.1:'.$this->port, __DIR__.'/server/router.php'],
-            [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
-            $pipes,
-            null,
-            array_merge(getenv(), ['SERENO_TEST_DIR' => $this->dir]),
-        );
-        $this->assertIsResource($this->process);
-
-        for ($i = 0; $i < 100; $i++) {
-            $socket = @fsockopen('127.0.0.1', $this->port, $errno, $errstr, 0.1);
-
-            if ($socket !== false) {
-                fclose($socket);
-
-                return;
-            }
-
-            usleep(50_000);
-        }
-
-        $this->fail('The test HTTP server did not start.');
-    }
-
-    private function freePort(): int
-    {
-        $server = stream_socket_server('tcp://127.0.0.1:0');
-        $name = (string) stream_socket_get_name($server, false);
-        fclose($server);
-
-        return (int) substr($name, strrpos($name, ':') + 1);
+        $this->server = TestServer::start($this->dir);
+        $this->port = $this->server->port;
     }
 }

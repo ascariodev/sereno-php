@@ -13,6 +13,9 @@ final class TestServer
     /** @var resource|null */
     private $process;
 
+    /**
+     * @param  resource  $process
+     */
     private function __construct(
         $process,
         public readonly int $port,

@@ -143,26 +143,30 @@ final class TransportTest extends TestCase
     {
         $listener = stream_socket_server('tcp://127.0.0.1:0');
         $this->assertNotFalse($listener);
-        $name = (string) stream_socket_get_name($listener, false);
-        $port = (int) substr($name, strrpos($name, ':') + 1);
 
-        $startedAt = microtime(true);
-        $result = (new Transport('http://127.0.0.1:'.$port, self::KEY, 0.4))->send($this->batch(1));
-        $elapsed = microtime(true) - $startedAt;
+        try {
+            $name = (string) stream_socket_get_name($listener, false);
+            $port = (int) substr($name, strrpos($name, ':') + 1);
 
-        $this->assertTrue($result->isError());
-        $this->assertTrue($result->transient);
-        $this->assertSame(2, $result->attempts);
-        $this->assertGreaterThanOrEqual(0.7, $elapsed);
-        $this->assertLessThan(3.0, $elapsed);
+            $startedAt = microtime(true);
+            $result = (new Transport('http://127.0.0.1:'.$port, self::KEY, 0.4))->send($this->batch(1));
+            $elapsed = microtime(true) - $startedAt;
 
-        $connections = 0;
-        while (($connection = @stream_socket_accept($listener, 0)) !== false) {
-            $connections++;
-            fclose($connection);
+            $this->assertTrue($result->isError());
+            $this->assertTrue($result->transient);
+            $this->assertSame(2, $result->attempts);
+            $this->assertGreaterThanOrEqual(0.7, $elapsed);
+            $this->assertLessThan(3.0, $elapsed);
+
+            $connections = 0;
+            while (($connection = @stream_socket_accept($listener, 0)) !== false) {
+                $connections++;
+                fclose($connection);
+            }
+            $this->assertSame(2, $connections);
+        } finally {
+            fclose($listener);
         }
-        fclose($listener);
-        $this->assertSame(2, $connections);
     }
 
     public function test_retry_is_skipped_when_less_than_half_a_second_is_left(): void
