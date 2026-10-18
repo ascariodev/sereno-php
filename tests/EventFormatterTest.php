@@ -229,13 +229,13 @@ final class EventFormatterTest extends TestCase
     }
 
     /**
-     * @param  array{class: string, message: string, file: string, line: int}  $spec
+     * @param  array{class: string, message: string, file?: string, line?: int}  $spec
      */
     private function makeException(array $spec): Throwable
     {
         $exception = new RuntimeException($spec['message']);
 
-        foreach (['file' => $spec['file'], 'line' => $spec['line']] as $property => $value) {
+        foreach (['file' => $spec['file'] ?? '', 'line' => $spec['line'] ?? 0] as $property => $value) {
             (new ReflectionProperty(Exception::class, $property))->setValue($exception, $value);
         }
 

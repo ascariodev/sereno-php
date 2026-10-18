@@ -199,7 +199,7 @@ class EventFormatter
         return [
             'class' => $exception::class,
             'message' => $exception->getMessage(),
-            'location' => $exception->getFile().':'.$exception->getLine(),
+            'location' => $this->location($exception),
             'trace' => mb_substr($this->clean($exception->getTraceAsString()), 0, self::MAX_TRACE_LENGTH),
         ];
     }
@@ -218,10 +218,19 @@ class EventFormatter
         $exception = $context['exception'] ?? null;
 
         if ($exception instanceof Throwable) {
-            return $this->fitFingerprint($exception::class.'|'.$exception->getFile().':'.$exception->getLine());
+            $location = $this->location($exception);
+
+            return $this->fitFingerprint($location === ''
+                ? $this->trim($this->clean($exception::class.'|'.$exception->getMessage()))
+                : $exception::class.'|'.$location);
         }
 
         return null;
+    }
+
+    private function location(Throwable $exception): string
+    {
+        return $exception->getFile() === '' ? '' : $exception->getFile().':'.$exception->getLine();
     }
 
     private function fitFingerprint(string $fingerprint): string
