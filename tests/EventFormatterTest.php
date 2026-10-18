@@ -80,6 +80,33 @@ final class EventFormatterTest extends TestCase
         $this->assertSame('a?b', $this->formatRecord("a\xFFb")['message']);
     }
 
+    public function test_trim_handles_long_whitespace_runs(): void
+    {
+        $inner = 'a'.str_repeat(' ', 8000).'a';
+        $leading = str_repeat(' ', 8000).'a';
+
+        $this->assertSame($inner, $this->formatRecord($inner)['message']);
+        $this->assertSame($leading, $this->formatRecord($leading)['message']);
+        $this->assertSame('-', $this->formatRecord(str_repeat(' ', 8192))['message']);
+    }
+
+    public function test_trim_falls_back_when_pcre_fails(): void
+    {
+        $jit = ini_get('pcre.jit');
+        $limit = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+
+        try {
+            $message = $this->formatRecord("  hola  mundo  \n")['message'];
+        } finally {
+            ini_set('pcre.jit', (string) $jit);
+            ini_set('pcre.backtrack_limit', (string) $limit);
+        }
+
+        $this->assertSame("  hola  mundo  \n", $message);
+    }
+
     public function test_invalid_utf8_in_context_key_becomes_question_mark(): void
     {
         $this->assertSame(['k?' => 'v'], $this->formatRecord('m', ["k\xFF" => 'v'])['context']);

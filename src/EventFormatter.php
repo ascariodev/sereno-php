@@ -244,6 +244,8 @@ class EventFormatter
     {
         $class = '['.self::TRIM_CHARS.']+';
 
-        return preg_replace('~^'.$class.'|'.$class.'$~u', '', $value) ?? '';
+        $char = '['.self::TRIM_CHARS.']';
+
+        return preg_replace('~^'.$class.'|'.$char.'(?<!'.$char.$char.')'.$char.'*+$~u', '', $value) ?? trim($value);
     }
 }
