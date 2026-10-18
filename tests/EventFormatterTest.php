@@ -98,6 +98,34 @@ final class EventFormatterTest extends TestCase
         $this->assertSame(['v' => ['a' => 1, 'b' => ['c' => 'x?']]], $this->formatRecord('m', ['v' => $value])['context']);
     }
 
+    /**
+     * @return array<string, array{mixed, mixed}>
+     */
+    public static function scalarJsonSerializables(): array
+    {
+        return [
+            'string with invalid utf-8' => ["x\xFF", 'x?'],
+            'int' => [42, 42],
+            'bool' => [true, true],
+        ];
+    }
+
+    #[DataProvider('scalarJsonSerializables')]
+    public function test_json_serializable_returning_scalar_is_kept(mixed $returned, mixed $expected): void
+    {
+        $value = new class($returned) implements JsonSerializable
+        {
+            public function __construct(private mixed $returned) {}
+
+            public function jsonSerialize(): mixed
+            {
+                return $this->returned;
+            }
+        };
+
+        $this->assertSame(['v' => $expected], $this->formatRecord('m', ['v' => $value])['context']);
+    }
+
     public function test_stringable_is_cast_to_string(): void
     {
         $value = new class implements Stringable
@@ -118,6 +146,22 @@ final class EventFormatterTest extends TestCase
         $this->assertSame(RuntimeException::class, $context['wrapper']['error']['class']);
         $this->assertSame('boom', $context['wrapper']['error']['message']);
         $this->assertArrayHasKey('trace', $context['wrapper']['error']);
+    }
+
+    public function test_nested_exception_has_location(): void
+    {
+        $exception = $this->makeException(['class' => RuntimeException::class, 'message' => 'boom', 'file' => '/app/Service.php', 'line' => 42]);
+
+        $context = $this->formatRecord('m', ['wrapper' => ['error' => $exception]])['context'];
+
+        $this->assertSame('/app/Service.php:42', $context['wrapper']['error']['location']);
+    }
+
+    public function test_invalid_utf8_in_nested_exception_message_becomes_question_mark(): void
+    {
+        $context = $this->formatRecord('m', ['wrapper' => ['error' => new RuntimeException("boom\xFF")]])['context'];
+
+        $this->assertSame('boom?', $context['wrapper']['error']['message']);
     }
 
     /**
