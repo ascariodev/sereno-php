@@ -229,7 +229,7 @@ final class EventFormatterTest extends TestCase
     }
 
     /**
-     * @param  array{class: string, message: string, file?: string, line?: int}  $spec
+     * @param  array{class: string, message: string, file?: string, line?: int, trace?: string}  $spec
      */
     private function makeException(array $spec): Throwable
     {
@@ -237,6 +237,12 @@ final class EventFormatterTest extends TestCase
 
         foreach (['file' => $spec['file'] ?? '', 'line' => $spec['line'] ?? 0] as $property => $value) {
             (new ReflectionProperty(Exception::class, $property))->setValue($exception, $value);
+        }
+
+        if (isset($spec['trace'])) {
+            $pattern = '/\A#0 \[internal function\]: (.*)\(\)\n#1 \{main\}\z/su';
+            $this->assertSame(1, preg_match($pattern, $spec['trace'], $parts));
+            (new ReflectionProperty(Exception::class, 'trace'))->setValue($exception, [['function' => $parts[1]]]);
         }
 
         return $exception;
